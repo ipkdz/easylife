@@ -167,6 +167,7 @@
     .page { padding: 16px; }
   }
 </style>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 <div class="app">
@@ -203,13 +204,31 @@
       </button>
     </nav>
     <div style="padding:10px 8px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px">
+      <div id="drive-status" style="display:none;padding:4px 10px;font-size:11px;border-radius:6px;margin-bottom:4px"></div>
+      <button class="nav-item" id="btn-drive-login" onclick="driveLogin()" style="color:var(--accent)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M8 12l2.5 2.5L16 9"/></svg>
+        เชื่อมต่อ Google Drive
+      </button>
+      <button class="nav-item" id="btn-drive-save" onclick="driveSave()" style="display:none;color:var(--green)">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        บันทึกลง Drive
+      </button>
+      <button class="nav-item" id="btn-drive-load" onclick="driveLoad()" style="display:none;color:var(--accent)">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        โหลดจาก Drive
+      </button>
+      <button class="nav-item" id="btn-drive-logout" onclick="driveLogout()" style="display:none;color:var(--text3)">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        ออกจากระบบ
+      </button>
+      <div style="height:1px;background:var(--border);margin:4px 0"></div>
       <button class="nav-item" onclick="exportData()" style="color:var(--green)">
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Export ข้อมูล
+        Export JSON
       </button>
       <label class="nav-item" style="cursor:pointer;color:var(--accent)">
         <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        Import ข้อมูล
+        Import JSON
         <input type="file" accept=".json" onchange="importData(event)" style="display:none">
       </label>
     </div>
@@ -1305,6 +1324,136 @@ function renameStockGroup(id, val){
   if(!state.stockGroups) return;
   const g = state.stockGroups.find(g=>g.id===id);
   if(g && val.trim()){ g.name=val.trim(); save(); }
+}
+
+// ═══════════════════════════════════════════════════════════
+// GOOGLE DRIVE SYNC
+// ═══════════════════════════════════════════════════════════
+const CLIENT_ID = '966042240814-4hk3r3ie2si507s325m9fuvsct1d64q8.apps.googleusercontent.com';
+const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
+const FILE_NAME = 'investment_tracker_data.json';
+let driveToken = null;
+let driveFileId = null;
+
+function driveSetStatus(msg, color='var(--text3)') {
+  const el = document.getElementById('drive-status');
+  el.style.display = msg ? 'block' : 'none';
+  el.style.color = color;
+  el.style.background = 'var(--surface2)';
+  el.textContent = msg;
+}
+
+function driveSetLoggedIn(user) {
+  document.getElementById('btn-drive-login').style.display = 'none';
+  document.getElementById('btn-drive-save').style.display = 'flex';
+  document.getElementById('btn-drive-load').style.display = 'flex';
+  document.getElementById('btn-drive-logout').style.display = 'flex';
+  driveSetStatus('✓ ' + (user||'เชื่อมต่อแล้ว'), 'var(--green)');
+}
+
+function driveSetLoggedOut() {
+  driveToken = null; driveFileId = null;
+  document.getElementById('btn-drive-login').style.display = 'flex';
+  document.getElementById('btn-drive-save').style.display = 'none';
+  document.getElementById('btn-drive-load').style.display = 'none';
+  document.getElementById('btn-drive-logout').style.display = 'none';
+  driveSetStatus('');
+}
+
+function driveLogin() {
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: async (resp) => {
+      if(resp.error) { driveSetStatus('Login ไม่สำเร็จ', 'var(--red)'); return; }
+      driveToken = resp.access_token;
+      // get user info
+      try {
+        const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {headers:{Authorization:'Bearer '+driveToken}});
+        const u = await r.json();
+        driveSetLoggedIn(u.email||'');
+      } catch(e) { driveSetLoggedIn(''); }
+      // auto load if file exists
+      await driveFindFile();
+      if(driveFileId) {
+        if(confirm('พบข้อมูลใน Drive ต้องการโหลดมาแทนข้อมูลปัจจุบันมั้ย?')) await driveLoad();
+      }
+    }
+  });
+  client.requestAccessToken();
+}
+
+function driveLogout() {
+  if(driveToken) google.accounts.oauth2.revoke(driveToken, ()=>{});
+  driveSetLoggedOut();
+}
+
+async function driveFindFile() {
+  try {
+    const r = await fetch(
+      "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='" + FILE_NAME + "'&fields=files(id,name)",
+      {headers:{Authorization:'Bearer '+driveToken}}
+    );
+    const d = await r.json();
+    driveFileId = d.files&&d.files.length ? d.files[0].id : null;
+  } catch(e) { driveFileId = null; }
+}
+
+async function driveSave() {
+  if(!driveToken) { alert('กรุณา Login Google Drive ก่อน'); return; }
+  driveSetStatus('กำลังบันทึก...', 'var(--amber)');
+  try {
+    const json = JSON.stringify(state);
+    const blob = new Blob([json], {type:'application/json'});
+    await driveFindFile();
+    let url, method;
+    if(driveFileId) {
+      url = 'https://www.googleapis.com/upload/drive/v3/files/' + driveFileId + '?uploadType=media';
+      method = 'PATCH';
+    } else {
+      // Create with metadata first
+      const meta = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method:'POST',
+        headers:{Authorization:'Bearer '+driveToken,'Content-Type':'application/json'},
+        body: JSON.stringify({name:FILE_NAME, parents:['appDataFolder']})
+      });
+      const mj = await meta.json();
+      driveFileId = mj.id;
+      url = 'https://www.googleapis.com/upload/drive/v3/files/' + driveFileId + '?uploadType=media';
+      method = 'PATCH';
+    }
+    await fetch(url, {method, headers:{Authorization:'Bearer '+driveToken,'Content-Type':'application/json'}, body:json});
+    driveSetStatus('✓ บันทึกแล้ว ' + new Date().toLocaleTimeString('th-TH'), 'var(--green)');
+  } catch(e) {
+    driveSetStatus('บันทึกไม่สำเร็จ', 'var(--red)');
+  }
+}
+
+async function driveLoad() {
+  if(!driveToken) { alert('กรุณา Login Google Drive ก่อน'); return; }
+  driveSetStatus('กำลังโหลด...', 'var(--amber)');
+  try {
+    await driveFindFile();
+    if(!driveFileId) { driveSetStatus('ยังไม่มีไฟล์ใน Drive', 'var(--text3)'); return; }
+    const r = await fetch('https://www.googleapis.com/drive/v3/files/'+driveFileId+'?alt=media',
+      {headers:{Authorization:'Bearer '+driveToken}});
+    const d = await r.json();
+    if(!d.taxCategories && !d.insurances && !d.mfGroups) throw new Error();
+    state = d;
+    if(!state.stockGroups) state.stockGroups = [];
+    save();
+    renderTax(); renderIns(); renderMF(); renderStocks();
+    driveSetStatus('✓ โหลดแล้ว', 'var(--green)');
+  } catch(e) {
+    driveSetStatus('โหลดไม่สำเร็จ', 'var(--red)');
+  }
+}
+
+// Auto-save to Drive after every save()
+const _origSave = save;
+function save() {
+  _origSave();
+  if(driveToken) driveSave();
 }
 
 // ─── EXPORT / IMPORT ───────────────────────────────────────
