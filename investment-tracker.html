@@ -1449,11 +1449,15 @@ async function driveLoad() {
   }
 }
 
-// Auto-save to Drive after every save()
+// Auto-save to Drive after every save() — use flag to prevent recursion
+let _saving = false;
 const _origSave = save;
 function save() {
+  if(_saving) return;
+  _saving = true;
   _origSave();
-  if(driveToken) driveSave();
+  _saving = false;
+  if(driveToken) setTimeout(driveSave, 0);
 }
 
 // ─── EXPORT / IMPORT ───────────────────────────────────────
