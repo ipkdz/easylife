@@ -1475,16 +1475,22 @@ function importData(e){
   const reader = new FileReader();
   reader.onload = ev => {
     try {
-      const parsed = JSON.parse(ev.target.result);
+      let raw = ev.target.result.trim();
+      // strip surrounding quotes if copy-pasted from console
+      if((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))){
+        raw = raw.slice(1,-1);
+      }
+      const parsed = JSON.parse(raw);
       if(!parsed.taxCategories && !parsed.insurances && !parsed.mfGroups)
-        throw new Error('ไฟล์ไม่ถูกต้อง');
+        throw new Error('ไม่พบ key ที่ถูกต้อง');
       if(!confirm('นำเข้าข้อมูลใหม่จะแทนที่ข้อมูลปัจจุบันทั้งหมด ยืนยันมั้ย?')) return;
       state = parsed;
+      if(!state.stockGroups) state.stockGroups = [];
       save();
-      renderTax(); renderIns(); renderMF();
+      renderTax(); renderIns(); renderMF(); renderStocks();
       alert('นำเข้าข้อมูลสำเร็จ!');
     } catch(err) {
-      alert('ไฟล์ไม่ถูกต้อง กรุณาใช้ไฟล์ backup ที่ export จากแอพนี้เท่านั้น');
+      alert('นำเข้าไม่สำเร็จ: ' + err.message);
     }
   };
   reader.readAsText(file);
