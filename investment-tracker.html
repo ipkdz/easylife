@@ -1028,9 +1028,11 @@ function renderSummary(){
 function addStockGroup(){
   prompt2('เพิ่มกลุ่มหุ้น',[
     {key:'name', label:'ชื่อกลุ่ม (เช่น SET, US Stocks)', placeholder:'SET'},
+    {key:'currency', label:'สกุลเงิน', type:'select', options:[{v:'THB',l:'THB (บาท)'},{v:'USD',l:'USD (ดอลลาร์)'},{v:'HKD',l:'HKD'},{v:'OTHER',l:'อื่นๆ'}]},
+    {key:'fxRate', label:'อัตราแลกเปลี่ยน (1 USD = ? THB) ถ้า THB ใส่ 1', type:'number', placeholder:'35', default:'1'},
   ], v=>{
     if(!state.stockGroups) state.stockGroups=[];
-    state.stockGroups.push({id:uid(), name:v.name.trim()||'กลุ่มใหม่', stocks:[]});
+    state.stockGroups.push({id:uid(), name:v.name.trim()||'กลุ่มใหม่', currency:v.currency||'THB', fxRate:parseFloat(v.fxRate)||1, stocks:[]});
     save(); renderStocks();
   });
 }
@@ -1079,14 +1081,16 @@ function deleteStockGroup(groupId){
   save(); renderStocks();
 }
 
+function stockValTHB(g, st){ return st.shares * st.price * (g.fxRate||1); }
+
 function renderStocks(){
   if(!state.stockGroups) state.stockGroups=[];
   const groups = state.stockGroups;
-  const grandTotal = groups.reduce((s,g)=>s+g.stocks.reduce((s2,st)=>s2+(st.shares*st.price),0),0);
+  const grandTotalTHB = groups.reduce((s,g)=>s+g.stocks.reduce((s2,st)=>s2+stockValTHB(g,st),0),0);
   const totalStocks = groups.reduce((s,g)=>s+g.stocks.length,0);
 
   document.getElementById('stocks-summary').innerHTML=`
-    <div class="stat-card"><div class="stat-label">มูลค่ารวม</div><div class="stat-value">${fmt(Math.round(grandTotal))}</div><div class="stat-sub">บาท</div></div>
+    <div class="stat-card"><div class="stat-label">มูลค่ารวม (THB)</div><div class="stat-value">${fmt(Math.round(grandTotalTHB))}</div><div class="stat-sub">บาท</div></div>
     <div class="stat-card"><div class="stat-label">จำนวนหุ้น</div><div class="stat-value">${totalStocks}</div><div class="stat-sub">ตัว</div></div>
     <div class="stat-card"><div class="stat-label">จำนวนกลุ่ม</div><div class="stat-value">${groups.length}</div><div class="stat-sub">กลุ่ม</div></div>
   `;
@@ -1098,11 +1102,18 @@ function renderStocks(){
 
   let html='';
   groups.forEach(g=>{
-    const gTotal = g.stocks.reduce((s,st)=>s+(st.shares*st.price),0);
+    const cur = g.currency||'THB';
+    const fx = g.fxRate||1;
+    const isForex = cur !== 'THB';
+    const gTotalLocal = g.stocks.reduce((s,st)=>s+(st.shares*st.price),0);
+    const gTotalTHB = g.stocks.reduce((s,st)=>s+stockValTHB(g,st),0);
+
     html+=`<div style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <input style="font-size:15px;font-weight:600;border:none;background:transparent;color:var(--text);padding:2px 0;line-height:1.5;min-width:80px;width:auto;overflow:visible;height:auto" value="${g.name}" onchange="renameStockGroup('${g.id}',this.value)">
-        <span style="color:var(--text3);font-size:13px;margin-left:auto">มูลค่า ${fmt(Math.round(gTotal))} บาท</span>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <input style="font-size:15px;font-weight:600;border:none;background:transparent;color:var(--text);padding:2px 0;line-height:1.5;flex:1;min-width:0;overflow:visible;height:auto" value="${g.name}" onchange="renameStockGroup('${g.id}',this.value)">
+        <span class="badge badge-gray">${cur}</span>
+        ${isForex?`<span style="font-size:12px;color:var(--text3)">1 ${cur} = <input type="number" value="${fx}" style="width:60px;font-size:12px;padding:2px 5px;display:inline" onchange="updateFxRate('${g.id}',this.value)"> THB</span>`:''}
+        <span style="color:var(--text3);font-size:13px">${isForex?`${fmt(gTotalLocal.toFixed(2))} ${cur} = `:''}<strong>${fmt(Math.round(gTotalTHB))} บาท</strong></span>
         <button class="btn btn-sm" onclick="addStock('${g.id}')">+ เพิ่มหุ้น</button>
         <button class="btn btn-sm btn-danger" onclick="deleteStockGroup('${g.id}')">ลบกลุ่ม</button>
       </div>`;
@@ -1111,26 +1122,38 @@ function renderStocks(){
       html+=`<div class="card"><div class="empty" style="padding:16px">ยังไม่มีหุ้นในกลุ่มนี้</div></div>`;
     } else {
       html+=`<div class="card"><table>
-        <tr><th>หุ้น</th><th>จำนวนหุ้น</th><th>ราคา/หุ้น</th><th>มูลค่า</th><th></th></tr>`;
+        <tr><th>หุ้น</th><th>จำนวนหุ้น</th><th>ราคา/หุ้น (${cur})</th>${isForex?`<th>มูลค่า (${cur})</th>`:''}
+        <th>มูลค่า (THB)</th><th></th></tr>`;
       g.stocks.forEach(st=>{
-        const val = st.shares * st.price;
+        const valLocal = st.shares * st.price;
+        const valTHB = stockValTHB(g, st);
         html+=`<tr>
           <td><input type="text" value="${st.ticker}" style="font-weight:600;width:90px;border:1px solid transparent;background:transparent;padding:2px 4px;border-radius:4px" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='transparent';editStock('${g.id}','${st.id}','ticker',this.value)"></td>
           <td><input type="number" value="${st.shares}" style="width:90px" onchange="editStock('${g.id}','${st.id}','shares',this.value)"></td>
           <td><input type="number" value="${st.price}" style="width:100px" onchange="editStock('${g.id}','${st.id}','price',this.value)"></td>
-          <td style="font-weight:500">${fmt(Math.round(val))} บาท</td>
+          ${isForex?`<td style="color:var(--text3)">${fmt(valLocal.toFixed(2))}</td>`:''}
+          <td style="font-weight:500">${fmt(Math.round(valTHB))}</td>
           <td><button class="btn btn-sm btn-danger" onclick="deleteStock('${g.id}','${st.id}')">ลบ</button></td>
         </tr>`;
       });
       html+=`<tr style="background:var(--surface2)">
-        <td colspan="3" style="font-weight:600">รวม</td>
-        <td style="font-weight:600">${fmt(Math.round(gTotal))} บาท</td>
+        <td colspan="${isForex?3:3}" style="font-weight:600">รวม</td>
+        ${isForex?`<td style="font-weight:600;color:var(--text3)">${fmt(gTotalLocal.toFixed(2))} ${cur}</td>`:''}
+        <td style="font-weight:600">${fmt(Math.round(gTotalTHB))} บาท</td>
         <td></td>
       </tr></table></div>`;
     }
     html+=`</div>`;
   });
   document.getElementById('stocks-groups').innerHTML=html;
+}
+
+function updateFxRate(groupId, val){
+  if(!state.stockGroups) return;
+  const g = state.stockGroups.find(g=>g.id===groupId);
+  if(!g) return;
+  g.fxRate = parseFloat(val)||1;
+  save(); renderStocks();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1158,8 +1181,9 @@ function getPortfolioData(){
   });
   // Stocks
   (state.stockGroups||[]).forEach(g=>{
+    const fx = g.fxRate||1;
     g.stocks.forEach(st=>{
-      const val=Math.round(st.shares*st.price);
+      const val=Math.round(st.shares*st.price*fx);
       if(val>0) sections.push({group:'หุ้น', label:`[${g.name}] ${st.ticker}`, amt:val});
     });
   });
