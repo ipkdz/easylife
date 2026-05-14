@@ -341,6 +341,20 @@ function load(){
 }
 
 function uid(){ return Math.random().toString(36).slice(2,9); }
+
+function nowBKK(){
+  // GMT+7
+  const d = new Date(new Date().getTime() + 7*60*60*1000);
+  return d.toISOString().slice(0,10); // YYYY-MM-DD in BKK time
+}
+
+function fmtDate(iso){
+  if(!iso) return '';
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+
 function fmt(n){ return Number(n||0).toLocaleString('th-TH'); }
 function parseYear(v){ return parseInt(v)||0; }
 
@@ -541,11 +555,13 @@ function deleteTaxLog(catId, fundId, logId){
 function renderTax(){
   const cats = state.taxCategories;
   // summary
-  const totalAll = cats.reduce((s,c)=>s+c.funds.reduce((s2,f)=>s2+f.lots.reduce((s3,l)=>s3+l.amt,0),0),0);
+  const totalAll = cats.reduce((s,c)=>s+c.funds.reduce((s2,f)=>s2+taxFundCurrentVal(f),0),0);
+  const totalAllInvested = cats.reduce((s,c)=>s+c.funds.reduce((s2,f)=>s2+f.lots.reduce((s3,l)=>s3+l.amt,0),0),0);
   const totalCats = cats.length;
   const totalFunds = cats.reduce((s,c)=>s+c.funds.length,0);
   document.getElementById('tax-summary').innerHTML=`
-    <div class="stat-card"><div class="stat-label">ลงทุนรวม</div><div class="stat-value">${fmt(totalAll)}</div><div class="stat-sub">บาท</div></div>
+    <div class="stat-card"><div class="stat-label">มูลค่าปัจจุบัน</div><div class="stat-value">${fmt(Math.round(totalAll))}</div><div class="stat-sub">บาท</div></div>
+    <div class="stat-card"><div class="stat-label">เงินลงทุนรวม</div><div class="stat-value">${fmt(Math.round(totalAllInvested))}</div><div class="stat-sub">บาท</div></div>
     <div class="stat-card"><div class="stat-label">ประเภทกองทุน</div><div class="stat-value">${totalCats}</div><div class="stat-sub">ประเภท</div></div>
     <div class="stat-card"><div class="stat-label">กองทุนทั้งหมด</div><div class="stat-value">${totalFunds}</div><div class="stat-sub">กองทุน</div></div>
   `;
@@ -593,6 +609,17 @@ function renderTax(){
         const logs = fund.logs||[];
         html+=`<div class="card-body" style="padding:0">`;
         // DCA + buy button row
+        // NAV section for tax fund
+        html+=`<div style="background:var(--surface2);border-bottom:1px solid var(--border);padding:10px 16px">
+          <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">ราคาปัจจุบัน ${fund.navDate?'<span style=\'color:var(--green)\'>✓ อัพเดท '+fmtDate(fund.navDate)+'</span>':''}
+            ${fund.units&&fund.nav?`<span style="color:var(--text2);font-weight:400;font-size:11px"> — มูลค่า ${fmt(Math.round(fund.units*fund.nav))} บาท</span>`:''}
+          </div>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div class="field" style="flex:1;min-width:120px"><label>จำนวนหน่วย</label><input type="number" id="tunits-${fund.id}" value="${fund.units||''}" placeholder="เช่น 5000"></div>
+            <div class="field" style="flex:1;min-width:120px"><label>NAV (บาท/หน่วย)</label><input type="number" id="tnav-${fund.id}" value="${fund.nav||''}" placeholder="เช่น 12.50"></div>
+            <button class="btn btn-green btn-sm" style="margin-bottom:1px" onclick="updateTaxNav('${cat.id}','${fund.id}',document.getElementById('tunits-${fund.id}').value,document.getElementById('tnav-${fund.id}').value)">บันทึก</button>
+          </div>
+        </div>`;
         html+=`<div class="add-row" style="border-top:none;border-bottom:1px solid var(--border)">
           ${dca.enabled
             ?`<span class="badge badge-blue">DCA ${fmt(dca.amount)}/เดือน วันที่ ${dca.dayOfMonth}</span>
@@ -791,6 +818,7 @@ function addMFFund(groupId){
     g.funds.push({
       id:uid(), name:v.name.trim()||'กองทุน',
       currentAmt:parseFloat(v.amt)||0,
+      units:null, nav:null, navDate:null,
       dca:{enabled:false, dayOfMonth:1, amount:0},
       logs:[]
     });
@@ -882,10 +910,12 @@ function deleteMFGroup(groupId){
 
 function renderMF(){
   const groups = state.mfGroups;
-  const totalAmt = groups.reduce((s,g)=>s+g.funds.reduce((s2,f)=>s2+f.currentAmt,0),0);
+  const totalAmt = groups.reduce((s,g)=>s+g.funds.reduce((s2,f)=>s2+mfCurrentVal(f),0),0);
+  const totalInvested = groups.reduce((s,g)=>s+g.funds.reduce((s2,f)=>s2+f.currentAmt,0),0);
   const totalDCA = groups.reduce((s,g)=>s+g.funds.filter(f=>f.dca.enabled).reduce((s2,f)=>s2+f.dca.amount,0),0);
   document.getElementById('mf-summary').innerHTML=`
-    <div class="stat-card"><div class="stat-label">พอร์ตรวม</div><div class="stat-value">${fmt(totalAmt)}</div><div class="stat-sub">บาท</div></div>
+    <div class="stat-card"><div class="stat-label">มูลค่าปัจจุบัน</div><div class="stat-value">${fmt(Math.round(totalAmt))}</div><div class="stat-sub">บาท</div></div>
+    <div class="stat-card"><div class="stat-label">เงินลงทุนรวม</div><div class="stat-value">${fmt(Math.round(totalInvested))}</div><div class="stat-sub">บาท</div></div>
     <div class="stat-card"><div class="stat-label">DCA/เดือน</div><div class="stat-value">${fmt(totalDCA)}</div><div class="stat-sub">บาท</div></div>
     <div class="stat-card"><div class="stat-label">จำนวนกองทุน</div><div class="stat-value">${groups.reduce((s,g)=>s+g.funds.length,0)}</div><div class="stat-sub">กองทุน</div></div>
   `;
@@ -895,7 +925,7 @@ function renderMF(){
   }
   let html='';
   groups.forEach(g=>{
-    const gTotal = g.funds.reduce((s,f)=>s+f.currentAmt,0);
+    const gTotal = g.funds.reduce((s,f)=>s+mfCurrentVal(f),0);
     const gKey = 'mg-'+g.id;
     const isOpen = openCards[gKey];
     html+=`<div style="margin-bottom:16px">
@@ -917,14 +947,27 @@ function renderMF(){
             <span style="font-size:14px;font-weight:500">${f.name}</span>
             ${f.dca.enabled?`<span class="badge badge-blue">DCA ${fmt(f.dca.amount)}/เดือน วันที่ ${f.dca.dayOfMonth}</span>`:''}
           </div>
-          <span style="font-size:14px;font-weight:500;color:var(--text)">${fmt(f.currentAmt)} บาท</span>
+          <div style="text-align:right">
+            <div style="font-size:14px;font-weight:500;color:var(--text)">${fmt(Math.round(mfCurrentVal(f)))} บาท</div>
+            ${f.units&&f.nav?`<div style="font-size:10px;color:var(--text3)">${f.units.toLocaleString()} หน่วย × ${f.nav} = ${f.navDate?'อัพเดท '+fmtDate(f.navDate):''}</div>`:''}
+          </div>
           <span class="chev ${fOpen?'open':''}" style="margin-left:8px">▼</span>
         </div>`;
       if(fOpen){
         html+=`<div class="card-body">
-          <div class="form-row" style="margin-bottom:14px">
+          <div class="form-row" style="margin-bottom:10px">
             <div class="field"><label>ชื่อกองทุน</label><input type="text" value="${f.name}" onchange="editMFFundName('${g.id}','${f.id}',this.value)"></div>
-            <div class="field"><label>ยอดเงินปัจจุบัน (บาท)</label><input type="number" value="${f.currentAmt}" onchange="editMFFundAmt('${g.id}','${f.id}',this.value)"></div>
+            <div class="field"><label>เงินลงทุนรวม (บาท)</label><input type="number" value="${f.currentAmt}" onchange="editMFFundAmt('${g.id}','${f.id}',this.value)"></div>
+          </div>
+          <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px">
+            <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px">อัพเดทราคาปัจจุบัน ${f.navDate?'<span style=\'color:var(--green)\'>✓ อัพเดท '+fmtDate(f.navDate)+'</span>':''}</div>
+            <div class="form-row">
+              <div class="field"><label>จำนวนหน่วย</label><input type="number" id="units-${f.id}" value="${f.units||''}" placeholder="เช่น 1500.23"></div>
+              <div class="field"><label>NAV ปัจจุบัน (บาท/หน่วย)</label><input type="number" id="nav-${f.id}" value="${f.nav||''}" placeholder="เช่น 12.50"></div>
+              <div style="display:flex;align-items:flex-end">
+                <button class="btn btn-green btn-sm" onclick="updateMFNav('${g.id}','${f.id}',document.getElementById('units-${f.id}').value,document.getElementById('nav-${f.id}').value)">บันทึก</button>
+              </div>
+            </div>
           </div>
           <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
             ${f.dca.enabled
@@ -1167,14 +1210,16 @@ function getPortfolioData(){
   // Tax funds
   state.taxCategories.forEach(cat=>{
     cat.funds.forEach(fund=>{
-      const total = fund.lots.filter(l=>!l.sold).reduce((s,l)=>s+l.amt,0);
-      if(total>0) sections.push({group:'ลดหย่อนภาษี', label:`[${cat.name}] ${fund.name}`, amt:total});
+      const invested = fund.lots.filter(l=>!l.sold).reduce((s,l)=>s+l.amt,0);
+      const val = taxFundCurrentVal(fund);
+      if(invested>0) sections.push({group:'ลดหย่อนภาษี', label:`[${cat.name}] ${fund.name}`, amt:val, invested});
     });
   });
   // MF
   state.mfGroups.forEach(g=>{
     g.funds.forEach(f=>{
-      if(f.currentAmt>0) sections.push({group:'กองทุนรวม', label:`[${g.name}] ${f.name}`, amt:f.currentAmt});
+      const val = mfCurrentVal(f);
+      if(val>0) sections.push({group:'กองทุนรวม', label:`[${g.name}] ${f.name}`, amt:val, invested:f.currentAmt});
     });
   });
   // Insurance (ยอดจ่ายสะสม)
@@ -1203,9 +1248,22 @@ function renderOverview(){
   const groupKeys = Object.keys(groups);
 
   // Stat cards
+  // compute invested per group
+  const groupInvested = {};
+  data.forEach(d=>{ groupInvested[d.group]=(groupInvested[d.group]||0)+(d.invested||d.amt); });
+
   document.getElementById('overview-summary').innerHTML=`
     <div class="stat-card"><div class="stat-label">ทรัพย์สินรวม</div><div class="stat-value">${fmt(Math.round(grandTotal))}</div><div class="stat-sub">บาท</div></div>
-    ${groupKeys.map(k=>`<div class="stat-card"><div class="stat-label">${k}</div><div class="stat-value" style="color:${GROUP_BASE[k]||'#6b7280'}">${fmt(Math.round(groups[k]))}</div><div class="stat-sub">${grandTotal?Math.round(groups[k]/grandTotal*100):0}%</div></div>`).join('')}
+    ${groupKeys.map(k=>{
+      const hasInvested = (k==='ลดหย่อนภาษี'||k==='กองทุนรวม') && groupInvested[k]!==undefined;
+      const inv = groupInvested[k]||0;
+      return `<div class="stat-card">
+        <div class="stat-label">${k}</div>
+        <div class="stat-value" style="color:${GROUP_BASE[k]||'#6b7280'}">${fmt(Math.round(groups[k]))}</div>
+        ${hasInvested?`<div style="font-size:12px;color:var(--text3);margin-top:1px">(ลงทุน ${fmt(Math.round(inv))})</div>`:''}
+        <div class="stat-sub">${grandTotal?Math.round(groups[k]/grandTotal*100):0}%</div>
+      </div>`;
+    }).join('')}
   `;
 
   // Horizontal bar chart
@@ -1255,8 +1313,13 @@ function renderOverview(){
   Object.keys(byGroup).forEach(g=>{
     const gTotal=byGroup[g].reduce((s,d)=>s+d.amt,0);
     detHtml+=`<div class="section-label">${g}</div><div class="card"><table>
-      <tr><th>สินทรัพย์</th><th style="text-align:right">มูลค่า</th><th style="text-align:right">สัดส่วน</th></tr>
-      ${byGroup[g].sort((a,b)=>b.amt-a.amt).map(d=>`<tr><td>${d.label.replace(/^\[.*?\]\s*/,'')}</td><td style="text-align:right;font-weight:500">${fmt(d.amt)}</td><td style="text-align:right;color:var(--text3)">${grandTotal?(d.amt/grandTotal*100).toFixed(1):0}%</td></tr>`).join('')}
+      <tr><th>สินทรัพย์</th><th style="text-align:right">มูลค่าปัจจุบัน</th><th style="text-align:right">เงินลงทุน</th><th style="text-align:right">สัดส่วน</th></tr>
+      ${byGroup[g].sort((a,b)=>b.amt-a.amt).map(d=>`<tr>
+        <td>${d.label.replace(/^\[.*?\]\s*/,'')}</td>
+        <td style="text-align:right;font-weight:500">${fmt(Math.round(d.amt))}</td>
+        ${d.invested!==undefined?`<td style="text-align:right;font-size:11px;color:var(--text3)">${fmt(Math.round(d.invested))}</td>`:'<td></td>'}
+        <td style="text-align:right;color:var(--text3)">${grandTotal?(d.amt/grandTotal*100).toFixed(1):0}%</td>
+      </tr>`).join('')}
       <tr style="background:var(--surface2)"><td style="font-weight:600">รวม ${g}</td><td style="text-align:right;font-weight:600">${fmt(gTotal)}</td><td style="text-align:right;font-weight:600">${grandTotal?(gTotal/grandTotal*100).toFixed(1):0}%</td></tr>
     </table></div>`;
   });
@@ -1333,9 +1396,42 @@ function exportExcel(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href=url;
-  a.download=`portfolio_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download=`portfolio_${nowBKK()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+
+// ─── NAV HELPERS ────────────────────────────────────────────
+function mfCurrentVal(f){
+  // If units & nav set, use units*nav; else currentAmt
+  if(f.units && f.nav) return f.units * f.nav;
+  return f.currentAmt || 0;
+}
+
+function taxFundCurrentVal(fund){
+  if(fund.units && fund.nav) return fund.units * fund.nav;
+  return fund.lots ? fund.lots.reduce((s,l)=>s+l.amt,0) : 0;
+}
+
+function updateMFNav(groupId, fundId, units, nav){
+  const g = state.mfGroups.find(g=>g.id===groupId);
+  const f = g&&g.funds.find(f=>f.id===fundId);
+  if(!f) return;
+  f.units = parseFloat(units)||null;
+  f.nav = parseFloat(nav)||null;
+  f.navDate = nowBKK();
+  save(); renderMF();
+}
+
+function updateTaxNav(catId, fundId, units, nav){
+  const cat = state.taxCategories.find(c=>c.id===catId);
+  const fund = cat&&cat.funds.find(f=>f.id===fundId);
+  if(!fund) return;
+  fund.units = parseFloat(units)||null;
+  fund.nav = parseFloat(nav)||null;
+  fund.navDate = nowBKK();
+  save(); renderTax();
 }
 
 // ─── RENAME HELPERS ──────────────────────────────────────
@@ -1493,7 +1589,7 @@ function exportData(){
   const blob = new Blob([json], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const date = new Date().toISOString().slice(0,10);
+  const date = nowBKK();
   a.href = url;
   a.download = 'investment_backup_' + date + '.json';
   a.click();
