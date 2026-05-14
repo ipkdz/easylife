@@ -578,10 +578,12 @@ function renderTax(){
       const fundKey = 'fund-'+fund.id;
       const fOpen = openCards[fundKey];
       const activeLots = fund.lots.filter(l=>!l.sold);
+      const fdca = fund.dca||{enabled:false,dayOfMonth:1,amount:0};
       html+=`<div class="card">
         <div class="card-header" onclick="openCards['${fundKey}']=!openCards['${fundKey}'];renderTax()">
           <span style="font-size:14px;font-weight:500;flex:1">${fund.name}</span>
-          <span style="font-size:12px;color:var(--text3)">${activeLots.length} lot · ${fmt(fundTotal)} บาท</span>
+          ${fdca.enabled?`<span class="badge badge-blue" style="flex-shrink:0">DCA ${fmt(fdca.amount)}/เดือน วันที่ ${fdca.dayOfMonth}</span>`:''}
+          <span style="font-size:12px;color:var(--text3);margin-left:4px">${activeLots.length} lot · ${fmt(fundTotal)} บาท</span>
           <button class="btn btn-sm btn-danger" style="margin-left:8px" onclick="event.stopPropagation();deleteTaxFund('${cat.id}','${fund.id}')">ลบ</button>
           <span class="chev ${fOpen?'open':''}">▼</span>
         </div>`;
